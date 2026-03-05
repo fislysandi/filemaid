@@ -145,6 +145,48 @@ Example in `~/.config/filemaid/config.lisp`:
 - Dependency strategy: OCICL-managed dependencies
 - Test entrypoint: `asdf:test-system "filemaid"`
 
+## Build Documentation Bundle
+
+Create a local docs bundle (README, CONTEXT7, and Filemaid context files):
+
+```bash
+./scripts/build-docs.sh
+```
+
+Custom output path:
+
+```bash
+./scripts/build-docs.sh /tmp/filemaid-docs
+```
+
+## Build Binary
+
+Build an executable in `build/filemaid`:
+
+```bash
+./scripts/build-binary.sh
+```
+
+Custom output location:
+
+```bash
+./scripts/build-binary.sh /tmp/filemaid-build /tmp/filemaid-build/filemaid
+```
+
+## Install Binary to ~/.local/bin
+
+Install directly to `~/.local/bin/filemaid`:
+
+```bash
+./scripts/install-local.sh
+```
+
+If needed, add to PATH:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
 ## Project Layout
 
 ```text

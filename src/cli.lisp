@@ -676,13 +676,16 @@ When REPLACE is true, replace current entries instead of merging."
                 effective-file-count)
         (print-conflict-diagnostics report diagnostics-format)
         (print-execution-report execution-report))
-      (if verbose
-          (dolist (result results)
-            (format t "~S~%" result))
-          (format t "~D action(s) ~A.~%"
-                  (length results)
-                  (if dry-run "planned (dry-run)" "executed"))))
-      results)))
+      (cond
+        (verbose
+         (dolist (result results)
+           (format t "~S~%" result)))
+        (dry-run
+         (print-plan-preview results)
+         (format t "~D action(s) planned (dry-run).~%" (length results)))
+        (t
+         (format t "~D action(s) executed.~%" (length results)))))
+       results)))
 
 (defun run-with-confirmation (rules-file args)
   "Run command flow with preview and interactive approval when needed."
