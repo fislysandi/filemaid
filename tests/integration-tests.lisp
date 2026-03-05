@@ -1,0 +1,121 @@
+(in-package :filemaid.tests)
+
+(defun write-temp-rule-file (path source-dir)
+  "Write a temporary rules file targeting SOURCE-DIR."
+  (with-open-file (stream path
+                          :direction :output
+                          :if-exists :supersede
+                          :if-does-not-exist :create)
+    (format stream "(in-package :filemaid)~%")
+    (format stream "(register-rule~%")
+    (format stream " (rule smoke~%")
+    (format stream "   (from ~S)~%" source-dir)
+    (format stream "   (when (extension \"pdf\"))~%")
+    (format stream "   (move \"/tmp/filemaid-out\")))~%")))
+
+(defun write-conflict-rule-file (path source-dir)
+  "Write rules that intentionally conflict on same source file."
+  (with-open-file (stream path
+                          :direction :output
+                          :if-exists :supersede
+                          :if-does-not-exist :create)
+    (format stream "(in-package :filemaid)~%")
+    (format stream "(register-rule (rule left (from ~S) (when (extension \"pdf\")) (move \"/tmp/left\")))~%"
+            source-dir)
+    (format stream "(register-rule (rule right (from ~S) (when (extension \"pdf\")) (move \"/tmp/right\")))~%"
+            source-dir)))
+
+(defun test-cli-integration ()
+  "Test CLI command integration across preview and watch flows."
+  (let* ((suffix (write-to-string (get-universal-time)))
+         (source-dir (format nil "/tmp/filemaid-test-source-~A/" suffix))
+         (source-pdf (format nil "~Asample.pdf" source-dir))
+         (rules-file (format nil "/tmp/filemaid-test-rules-~A.lisp" suffix))
+         (conflict-rules-file (format nil "/tmp/filemaid-conflict-rules-~A.lisp" suffix))
+         (template-file (format nil "/tmp/filemaid-template-~A.lisp" suffix))
+         (project-root (format nil "/tmp/filemaid-project-~A/" suffix))
+         (projects-root (format nil "/tmp/filemaid-projects-root-~A/" suffix))
+         (templates-root (format nil "/tmp/filemaid-templates-root-~A/" suffix))
+         (named-template-name "invoice-template")
+         (named-template-path (format nil "~A~A.lisp" templates-root named-template-name))
+         (old-projects-root filemaid::*projects-root*)
+         (old-templates-root filemaid::*project-templates-root*))
+    (ensure-directories-exist source-dir)
+    (ensure-directories-exist templates-root)
+    (with-open-file (stream source-pdf :direction :output :if-exists :supersede :if-does-not-exist :create)
+      (format stream "sample"))
+    (write-temp-rule-file rules-file source-dir)
+    (write-conflict-rule-file conflict-rules-file source-dir)
+    (write-temp-rule-file template-file source-dir)
+    (write-temp-rule-file named-template-path source-dir)
+    (assert-true (= 1 (run-cli nil))
+                 "run-cli with no command should return 1")
+    (assert-true (= 1 (run-cli (list "unknown")))
+                 "run-cli with unknown command should return 1")
+    (assert-true (zerop (run-cli (list "preview" rules-file)))
+                 "preview command should return 0")
+    (assert-true (zerop (run-cli (list "preview" rules-file "--conflict-policy" "first-wins")))
+                 "preview with conflict policy should return 0")
+    (assert-true (zerop (run-cli (list "preview" rules-file "--verbose" "--diagnostics-format" "json")))
+                 "preview with json diagnostics should return 0")
+    (assert-true (= 2 (run-cli (list "explain-conflicts" conflict-rules-file)))
+                 "explain-conflicts should return 2 when conflicts exist")
+    (assert-true (zerop (run-cli (list "explain-conflicts" rules-file)))
+                 "explain-conflicts should return 0 when no conflicts exist")
+    (assert-true (zerop (run-cli (list "watch" source-dir "--backend" "poll" "--interval" "1" "--iterations" "1")))
+                 "watch poll command should return 0")
+    (assert-true (zerop (run-cli (list "init-project"
+                                       "--template" template-file
+                                       "--target" project-root)))
+                 "init-project should return 0")
+    (assert-true (probe-file (merge-pathnames "src/" (uiop:ensure-directory-pathname project-root)))
+                 "init-project should create src directory")
+    (assert-true (probe-file (merge-pathnames "rules/organization-rules.lisp"
+                                              (uiop:ensure-directory-pathname project-root)))
+                 "init-project should install organization-rules.lisp")
+    (setf filemaid::*projects-root* projects-root)
+    (setf filemaid::*project-templates-root* templates-root)
+    (assert-true (zerop (run-cli (list "init-project"
+                                       "--template" named-template-name
+                                       "--name" "custom-project"
+                                       "--template-name" "my-rules")))
+                 "init-project should resolve named template")
+    (assert-true (probe-file (merge-pathnames "custom-project/src/"
+                                              (uiop:ensure-directory-pathname projects-root)))
+                 "default project root should be under projects root")
+    (assert-true (probe-file (merge-pathnames "custom-project/rules/my-rules.lisp"
+                                              (uiop:ensure-directory-pathname projects-root)))
+                 "template-name should control output rules filename")
+    (setf filemaid::*projects-root* old-projects-root)
+    (setf filemaid::*project-templates-root* old-templates-root)
+    (delete-file rules-file)
+    (delete-file conflict-rules-file)
+    (delete-file template-file)
+    (delete-file named-template-path)
+    (delete-file source-pdf)
+    (uiop:delete-directory-tree (uiop:ensure-directory-pathname source-dir)
+                                :validate t
+                                :if-does-not-exist :ignore)
+    (uiop:delete-directory-tree (uiop:ensure-directory-pathname templates-root)
+                                :validate t
+                                :if-does-not-exist :ignore)
+    (uiop:delete-directory-tree (uiop:ensure-directory-pathname projects-root)
+                                :validate t
+                                :if-does-not-exist :ignore)
+    (uiop:delete-directory-tree (uiop:ensure-directory-pathname project-root)
+                                :validate t
+                                :if-does-not-exist :ignore)))
+
+(defun test-python-bridge-gating ()
+  "Test optional Python bridge enable/disable behavior."
+  (set-python-pdf-provider (lambda (path needle)
+                             (declare (ignore path needle))
+                             t))
+  (set-python-integration-enabled nil)
+  (assert-true (not (python-pdf-contains-p "/tmp/a.pdf" "invoice"))
+               "python provider must be disabled by flag")
+  (set-python-integration-enabled t)
+  (assert-true (python-pdf-contains-p "/tmp/a.pdf" "invoice")
+               "python provider should run when enabled")
+  (set-python-pdf-provider nil)
+  (set-python-integration-enabled nil))
