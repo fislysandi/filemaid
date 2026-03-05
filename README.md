@@ -25,6 +25,7 @@ filemaid preview rules/example-rules.lisp
 filemaid init-project --template invoice-template --name my-filemaid-project
 filemaid init-project --template rules/example-rules.lisp --target ./my-custom-folder --template-name org-rules
 filemaid explain-conflicts rules/example-rules.lisp --diagnostics-format json
+filemaid conflict-profile list
 filemaid watch ~/Downloads --backend auto --interval 2 --iterations 5 --verbose
 ```
 
@@ -34,6 +35,7 @@ filemaid watch ~/Downloads --backend auto --interval 2 --iterations 5 --verbose
 - `preview`: always dry-run, optional `--verbose`, `--conflict-policy`, `--file-conflict-policy`, `--diagnostics-format text|json`
 - `init-project`: `--template <name-or-path>`, optional `--template-name NAME`, `--target DIR`, `--name PROJECT`, `--verbose`
 - `explain-conflicts`: analyze rules and report conflicts without applying changes (exit `0` no conflicts, `2` conflicts found)
+- `conflict-profile`: manage saved per-conflict decisions (`list`, `remove <key|index>`, `clear`)
 - `scan`: optional `--recursive`
 - `watch`: `--backend auto|poll|inotify`, `--interval N`, `--iterations N`, `--recursive`, `--verbose`
 
@@ -61,6 +63,8 @@ filemaid watch ~/Downloads --backend auto --interval 2 --iterations 5 --verbose
 - In non-automated mode, detected conflicts are listed up front and Filemaid prompts for conflict policy before preview/apply.
 - With `--per-conflict`, Filemaid prompts per conflict pair (left/right/skip/policy fallback) before final preview.
 - Per-conflict decisions are persisted to `~/.config/filemaid/conflict-resolution.sexp` and reused automatically.
+- Use `filemaid conflict-profile list` to inspect saved decisions.
+- Use `filemaid conflict-profile remove <key|index>` or `clear` to manage saved decisions.
 - Use `--yes` (or `--auto-approve`) to skip interactive confirmation for automation.
 
 Example in `~/.config/filemaid/config.lisp`:

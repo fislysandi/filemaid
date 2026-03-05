@@ -19,6 +19,8 @@
           "                     [--target DIR] [--name NAME] [--verbose]~%")
   (format t
           "  filemaid explain-conflicts <rules-file> [--diagnostics-format FMT]~%")
+  (format t
+          "  filemaid conflict-profile list|clear|remove <key> [--diagnostics-format FMT]~%")
   (format t "  filemaid scan <directory>~%")
   (format t
           "  filemaid watch <directory> [--backend auto|poll|inotify] [--interval N]~%")
@@ -423,6 +425,86 @@
     (print-conflict-diagnostics (conflicts-to-report conflicts) diagnostics-format)
     (if conflicts 2 0)))
 
+(defun conflict-profile-entries ()
+  "Return profile entries as list of (key . decision)."
+  (load-conflict-resolution-profile)
+  (or *conflict-resolution-profile* '()))
+
+(defun print-conflict-profile-list (entries diagnostics-format)
+  "Print profile ENTRIES in DIAGNOSTICS-FORMAT."
+  (cond
+    ((null entries)
+     (format t "Conflict profile: empty.~%"))
+    ((eql diagnostics-format :json)
+     (format t "[~%")
+     (loop for entry in entries
+           for index from 0 do
+              (format t "  {\"key\":\"~A\",\"decision\":\"~A\"}~A~%"
+                      (json-escape-string (first entry))
+                      (json-escape-string (string-downcase (string (rest entry))))
+                      (if (< index (1- (length entries))) "," "")))
+     (format t "]~%"))
+    (t
+      (format t "Conflict profile entries (~D):~%" (length entries))
+      (loop for entry in entries
+            for index from 1 do
+              (format t "  [~D] ~A => ~A~%" index (first entry) (rest entry))))))
+
+(defun resolve-profile-remove-entry (entries key)
+  "Resolve KEY as direct key or 1-based numeric index in ENTRIES."
+  (let ((direct (assoc key entries :test #'string=)))
+    (if direct
+        direct
+        (let ((parsed (parse-integer key :junk-allowed t)))
+          (if (and parsed (> parsed 0) (<= parsed (length entries)))
+              (nth (1- parsed) entries)
+              nil)))))
+
+(defun conflict-profile-list-command (&key (diagnostics-format :text))
+  "List persisted conflict profile entries."
+  (print-conflict-profile-list (conflict-profile-entries) diagnostics-format)
+  0)
+
+(defun conflict-profile-clear-command ()
+  "Clear all persisted conflict profile entries."
+  (setf *conflict-resolution-profile* nil)
+  (save-conflict-resolution-profile)
+  (format t "Conflict profile cleared.~%")
+  0)
+
+(defun conflict-profile-remove-command (key)
+  "Remove one persisted profile entry by KEY or 1-based index."
+  (unless key
+    (error "Provide key or index: filemaid conflict-profile remove <key>."))
+  (let* ((entries (conflict-profile-entries))
+         (entry (resolve-profile-remove-entry entries key)))
+    (cond
+      ((null entry)
+       (format t "Conflict profile entry not found: ~A~%" key)
+       1)
+      (t
+       (setf *conflict-resolution-profile*
+             (remove entry *conflict-resolution-profile* :test #'equal))
+       (save-conflict-resolution-profile)
+       (format t "Removed conflict profile entry: ~A~%" (first entry))
+       0))))
+
+(defun conflict-profile-command (args)
+  "Dispatch conflict-profile subcommands."
+  (let ((subcommand (first args))
+        (rest-args (rest args)))
+    (cond
+      ((or (null subcommand) (string= subcommand "list"))
+       (conflict-profile-list-command
+        :diagnostics-format
+        (normalize-diagnostics-format (flag-value rest-args "--diagnostics-format"))))
+      ((string= subcommand "clear")
+       (conflict-profile-clear-command))
+      ((string= subcommand "remove")
+       (conflict-profile-remove-command (first rest-args)))
+      (t
+       (error "Unsupported conflict-profile subcommand: ~A" subcommand)))))
+
 (defun resolve-interactive-file-policy (raw-file-policy automated-mode)
   "Resolve file conflict policy from RAW-FILE-POLICY or interactive prompt."
   (cond
@@ -729,6 +811,8 @@
         (first args)
         :diagnostics-format
         (normalize-diagnostics-format (flag-value args "--diagnostics-format"))))
+      ((string= command "conflict-profile")
+       (conflict-profile-command args))
       ((string= command "scan")
        (progn
          (scan-command (first args)
