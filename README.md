@@ -1,6 +1,6 @@
 # Filemaid
 
-Filemaid is a programmable filesystem automation engine written in Common Lisp.
+Filemaid is a programmable filesystem automation engine written in Common Lisp, Think of it as IFTTT for your file system - define patters, and filemaid moves, tags, or transforms files automatically when they appear in monitored directories.
 
 ## Core Pipeline
 
