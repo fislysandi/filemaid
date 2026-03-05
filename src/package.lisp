@@ -59,11 +59,14 @@
    #:*addons-root*
    #:*enabled-addons*
    #:*autoload-addons*
+   #:*filesystem-overview-default-format*
+   #:*filesystem-overview-renderer*
    #:global-rules-root-pathname
    #:addons-root-pathname
    #:discover-addon-files
    #:resolve-enabled-addon-files
    #:load-addons
+   #:valid-filesystem-overview-format-p
    #:resolve-default-rules-file
    #:resolve-rules-spec
    #:projects-root-pathname

@@ -22,7 +22,7 @@
   (format t
           "  filemaid template list~%")
   (format t
-          "  filemaid fs~%")
+          "  filemaid fs [--format tree|json]~%")
   (format t
           "  filemaid conflict-profile list|clear|remove|export|import ...~%")
   (format t
@@ -131,6 +131,13 @@
     (cond
       ((string= raw "json") :json)
       (t :text))))
+
+(defun normalize-filesystem-format (value)
+  "Normalize VALUE into :tree or :json filesystem display format."
+  (let ((raw (string-downcase (or value (string-downcase (string *filesystem-overview-default-format*))))))
+    (cond
+      ((string= raw "json") :json)
+      (t :tree))))
 
 (defun inotifywait-available-p ()
   "Return true when inotifywait binary is available."
@@ -357,12 +364,43 @@
   "Return friendly display label for PATH."
   (file-namestring (pathname path)))
 
+(defun pathname-text (path)
+  "Return stable namestring for PATH or empty string."
+  (if path
+      (namestring (pathname path))
+      ""))
+
 (defun project-label (project-dir)
   "Return project name label from PROJECT-DIR pathname."
   (let* ((dir (uiop:ensure-directory-pathname project-dir))
          (components (pathname-directory dir))
          (name (first (last components))))
     (if (stringp name) name (file-label dir))))
+
+(defun project-info (project-dir)
+  "Return plist metadata for one project directory."
+  (let* ((dir (uiop:ensure-directory-pathname project-dir))
+         (rules-file (merge-pathnames "rules/organization-rules.lisp" dir)))
+    (list :name (project-label dir)
+          :path (pathname-text dir)
+          :rules-file (and (probe-file rules-file)
+                           (pathname-text rules-file)))))
+
+(defun filesystem-overview-snapshot ()
+  "Return snapshot plist used for fs visualization commands."
+  (let ((projects-root (projects-root-pathname))
+        (rules-root (global-rules-root-pathname))
+        (templates-root (project-templates-root-pathname))
+        (addons-root (addons-root-pathname)))
+    (list
+     :roots (list :projects (pathname-text projects-root)
+                  :rules (pathname-text rules-root)
+                  :templates (pathname-text templates-root)
+                  :addons (pathname-text addons-root))
+     :projects (mapcar #'project-info (project-directories))
+     :rules (mapcar #'pathname-text (lisp-files-in-directory rules-root))
+     :templates (mapcar #'pathname-text (lisp-files-in-directory templates-root))
+     :addons (mapcar #'pathname-text (lisp-files-in-directory addons-root)))))
 
 (defun print-tree-files (prefix files)
   "Print FILES list with PREFIX tree indentation."
@@ -376,29 +414,88 @@
   (if (null projects)
       (format t "|  (no projects)~%")
       (dolist (project projects)
-        (let ((rules-file (merge-pathnames "rules/organization-rules.lisp"
-                                           (uiop:ensure-directory-pathname project))))
+        (let* ((info (project-info project))
+               (name (getf info :name))
+               (rules-file (getf info :rules-file)))
           (format t "|  |- ~A/~A~%"
-                  (project-label project)
-                  (if (probe-file rules-file) " (rules: organization-rules.lisp)" ""))))))
+                  name
+                  (if rules-file " (rules: organization-rules.lisp)" ""))))))
 
-(defun filesystem-overview-command ()
-  "Print filesystem-style overview of projects, rules, templates, and addons."
-  (let ((projects-root (projects-root-pathname))
-        (rules-root (global-rules-root-pathname))
-        (templates-root (project-templates-root-pathname))
-        (addons-root (addons-root-pathname)))
+(defun print-string-list-json (key values is-last)
+  "Print JSON array field KEY with VALUES."
+  (format t "  \"~A\": [" key)
+  (loop for value in values
+        for index from 0 do
+          (format t "\"~A\"~A"
+                  (json-escape-string value)
+                  (if (< index (1- (length values))) ", " "")))
+  (format t "]~A~%" (if is-last "" ",")))
+
+(defun print-projects-json (projects)
+  "Print JSON array for PROJECTS list."
+  (format t "  \"projects\": [")
+  (loop for info in projects
+        for index from 0 do
+          (format t
+                  "{\"name\":\"~A\",\"path\":\"~A\",\"rules\":\"~A\"}~A"
+                  (json-escape-string (or (getf info :name) ""))
+                  (json-escape-string (or (getf info :path) ""))
+                  (json-escape-string (or (getf info :rules-file) ""))
+                  (if (< index (1- (length projects))) "," "")))
+  (format t "],~%"))
+
+(defun print-filesystem-overview-json (snapshot)
+  "Print filesystem overview SNAPSHOT in JSON format."
+  (let ((roots (getf snapshot :roots))
+        (projects (getf snapshot :projects))
+        (rules (getf snapshot :rules))
+        (templates (getf snapshot :templates))
+        (addons (getf snapshot :addons)))
+    (format t "{~%")
+    (format t "  \"roots\": {\"projects\":\"~A\",\"rules\":\"~A\",\"templates\":\"~A\",\"addons\":\"~A\"},~%"
+            (json-escape-string (or (getf roots :projects) ""))
+            (json-escape-string (or (getf roots :rules) ""))
+            (json-escape-string (or (getf roots :templates) ""))
+            (json-escape-string (or (getf roots :addons) "")))
+    (print-projects-json projects)
+    (print-string-list-json "rules" rules nil)
+    (print-string-list-json "templates" templates nil)
+    (print-string-list-json "addons" addons t)
+    (format t "}~%")))
+
+(defun print-filesystem-overview-tree (snapshot)
+  "Print filesystem overview SNAPSHOT in tree format."
+  (let* ((roots (getf snapshot :roots))
+         (projects-root (getf roots :projects))
+         (rules-root (getf roots :rules))
+         (templates-root (getf roots :templates))
+         (addons-root (getf roots :addons))
+         (projects (project-directories)))
     (format t "Filemaid Filesystem Overview~%")
     (format t "~A~%" (namestring (uiop:ensure-directory-pathname (or (uiop:getenv "HOME") "~"))))
     (format t "|-- .config/filemaid/~%")
-    (format t "|  |-- projects/ (~A)~%" (namestring projects-root))
-    (print-project-tree (project-directories))
-    (format t "|  |-- rules/ (~A)~%" (namestring rules-root))
-    (print-tree-files "|  |  |- " (lisp-files-in-directory rules-root))
-    (format t "|  |-- templates/ (~A)~%" (namestring templates-root))
-    (print-tree-files "|  |  |- " (lisp-files-in-directory templates-root))
-    (format t "|  `-- addons/ (~A)~%" (namestring addons-root))
-    (print-tree-files "|     |- " (lisp-files-in-directory addons-root))
+    (format t "|  |-- projects/ (~A)~%" projects-root)
+    (print-project-tree projects)
+    (format t "|  |-- rules/ (~A)~%" rules-root)
+    (print-tree-files "|  |  |- " (mapcar #'pathname (getf snapshot :rules)))
+    (format t "|  |-- templates/ (~A)~%" templates-root)
+    (print-tree-files "|  |  |- " (mapcar #'pathname (getf snapshot :templates)))
+    (format t "|  `-- addons/ (~A)~%" addons-root)
+    (print-tree-files "|     |- " (mapcar #'pathname (getf snapshot :addons)))))
+
+(defun filesystem-overview-command (args)
+  "Print filesystem-style overview with optional custom rendering."
+  (let* ((format (normalize-filesystem-format (flag-value args "--format")))
+         (snapshot (filesystem-overview-snapshot)))
+    (cond
+      (*filesystem-overview-renderer*
+       (let ((result (funcall *filesystem-overview-renderer* snapshot :format format)))
+         (when (stringp result)
+           (format t "~A~%" result))))
+      ((eql format :json)
+       (print-filesystem-overview-json snapshot))
+      (t
+       (print-filesystem-overview-tree snapshot)))
     0))
 
 (defun resolve-project-root (template-spec project-name target-option)
@@ -1028,7 +1125,7 @@ When REPLACE is true, replace current entries instead of merging."
       ((string= command "template")
        (template-command args))
       ((string= command "fs")
-       (filesystem-overview-command))
+       (filesystem-overview-command args))
       ((string= command "conflict-profile")
        (conflict-profile-command args))
       ((string= command "scan")

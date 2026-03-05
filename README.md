@@ -31,6 +31,7 @@ filemaid init-project --template invoice-template --name my-filemaid-project
 filemaid init-project --template rules/example-rules.lisp --target ./my-custom-folder --template-name org-rules
 filemaid template list
 filemaid fs
+filemaid fs --format json
 filemaid explain-conflicts rules/example-rules.lisp --diagnostics-format json
 filemaid conflict-profile list
 filemaid preview examples/documents-rules.lisp
@@ -49,7 +50,7 @@ filemaid watch ~/Downloads --backend auto --interval 2 --iterations 5 --verbose
 - `preview`: supports short file names (e.g. `organization-rules.lisp`) with project/global lookup
 - `init-project`: `--template <name-or-path>`, optional `--template-name NAME`, `--target DIR`, `--name PROJECT`, `--verbose`
 - `template`: `list` available templates from configured templates root
-- `fs`: show filesystem-style overview of configured projects/rules/templates/addons
+- `fs`: show filesystem-style overview of configured projects/rules/templates/addons (`--format tree|json`)
 - `explain-conflicts`: analyze rules and report conflicts without applying changes (exit `0` no conflicts, `2` conflicts found)
 - `conflict-profile`: manage saved per-conflict decisions (`list`, `remove <key|index>`, `clear`, `export <path>`, `import <path> [--replace]`)
 - `scan`: optional `--recursive`
@@ -124,6 +125,14 @@ Example in `~/.config/filemaid/config.lisp`:
 (setf *autoload-addons* t)
 (setf *addons-root* #P"~/.config/filemaid/addons/")
 ;; (setf *enabled-addons* '("my-addon" "extra-rules.lisp"))
+
+;; Optional custom fs display (no source changes needed):
+;; (setf *filesystem-overview-renderer*
+;;       (lambda (snapshot &key format)
+;;         (declare (ignore format))
+;;         (format nil "Projects: ~D, Rules: ~D"
+;;                 (length (getf snapshot :projects))
+;;                 (length (getf snapshot :rules))))))
 
 ;; Optional path for persisted per-conflict choices:
 (setf *conflict-resolution-profile-path* #P"~/.config/filemaid/conflict-resolution.sexp")

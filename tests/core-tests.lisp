@@ -41,6 +41,7 @@
   (test-project-first-rules-resolution)
   (test-rules-spec-resolution)
   (test-addon-resolution)
+  (test-custom-filesystem-renderer)
   (test-cli-integration)
   (test-python-bridge-gating)
   (cond

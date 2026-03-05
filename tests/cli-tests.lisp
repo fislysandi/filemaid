@@ -160,3 +160,18 @@
     (uiop:delete-directory-tree (uiop:ensure-directory-pathname addons-root)
                                 :validate t
                                 :if-does-not-exist :ignore)))
+
+(defun test-custom-filesystem-renderer ()
+  "Test custom fs renderer hook without source changes."
+  (let ((called nil)
+        (old-renderer filemaid::*filesystem-overview-renderer*))
+    (setf filemaid::*filesystem-overview-renderer*
+          (lambda (snapshot &key format)
+            (declare (ignore snapshot format))
+            (setf called t)
+            "custom-render"))
+    (assert-true (zerop (filemaid:run-cli (list "fs" "--format" "json")))
+                 "fs command should run with custom renderer")
+    (assert-true called
+                 "custom renderer should be invoked")
+    (setf filemaid::*filesystem-overview-renderer* old-renderer)))

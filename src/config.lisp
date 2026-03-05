@@ -48,6 +48,12 @@
 (defparameter *autoload-addons* t
   "When true, load addons during startup via load-default-config.")
 
+(defparameter *filesystem-overview-default-format* :tree
+  "Default format for `filemaid fs` output (:tree or :json).")
+
+(defparameter *filesystem-overview-renderer* nil
+  "Optional function (snapshot &key format) for custom fs display rendering.")
+
 (defun valid-conflict-policy-p (policy)
   "Return true when POLICY is one of supported conflict policies."
   (member policy *valid-conflict-policies*))
@@ -168,6 +174,10 @@
       (when verbose
         (format t "Loaded addon: ~A~%" (namestring file))))
     files))
+
+(defun valid-filesystem-overview-format-p (format)
+  "Return true when FORMAT is supported for fs output."
+  (member format '(:tree :json)))
 
 (defun pathname-parent (path)
   "Return parent directory of PATH, or NIL when unavailable."
