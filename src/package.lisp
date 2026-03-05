@@ -53,6 +53,18 @@
    #:conflict-profile-set
    #:*conflict-resolution-profile-path*
    #:*conflict-resolution-profile*
+   #:*default-project-name*
+   #:*default-rules-files*
+   #:*global-rules-root*
+   #:*addons-root*
+   #:*enabled-addons*
+   #:*autoload-addons*
+   #:global-rules-root-pathname
+   #:addons-root-pathname
+   #:discover-addon-files
+   #:resolve-enabled-addon-files
+   #:load-addons
+   #:resolve-default-rules-file
    #:projects-root-pathname
    #:project-templates-root-pathname
    #:*projects-root*

@@ -22,20 +22,24 @@ Filemaid is a programmable filesystem automation engine written in Common Lisp.
 filemaid run rules/example-rules.lisp
 filemaid scan ~/Downloads
 filemaid preview rules/example-rules.lisp
+filemaid preview
 filemaid init-project --template invoice-template --name my-filemaid-project
 filemaid init-project --template rules/example-rules.lisp --target ./my-custom-folder --template-name org-rules
 filemaid explain-conflicts rules/example-rules.lisp --diagnostics-format json
 filemaid conflict-profile list
+filemaid preview examples/documents-rules.lisp
+filemaid conflict-profile export ./profile.sexp
+filemaid conflict-profile import ./profile.sexp
 filemaid watch ~/Downloads --backend auto --interval 2 --iterations 5 --verbose
 ```
 
 ## Runtime Flags
 
 - `run`: `--dry-run`, `--verbose`, `--no-rollback`, `--yes`, `--conflict-policy`, `--file-conflict-policy`, `--per-conflict`, `--diagnostics-format text|json`
-- `preview`: always dry-run, optional `--verbose`, `--conflict-policy`, `--file-conflict-policy`, `--diagnostics-format text|json`
+- `preview`: always dry-run; rules file is optional and falls back to configured/default project rules
 - `init-project`: `--template <name-or-path>`, optional `--template-name NAME`, `--target DIR`, `--name PROJECT`, `--verbose`
 - `explain-conflicts`: analyze rules and report conflicts without applying changes (exit `0` no conflicts, `2` conflicts found)
-- `conflict-profile`: manage saved per-conflict decisions (`list`, `remove <key|index>`, `clear`)
+- `conflict-profile`: manage saved per-conflict decisions (`list`, `remove <key|index>`, `clear`, `export <path>`, `import <path> [--replace]`)
 - `scan`: optional `--recursive`
 - `watch`: `--backend auto|poll|inotify`, `--interval N`, `--iterations N`, `--recursive`, `--verbose`
 
@@ -48,6 +52,35 @@ filemaid watch ~/Downloads --backend auto --interval 2 --iterations 5 --verbose
   - named templates from `~/.config/filemaid/projects/templates/`.
 - `--template-name` controls output filename under `rules/` (defaults to `organization-rules.lisp`).
 - `--name` controls default folder name when `--target` is omitted.
+
+## Default Rules Resolution
+
+When you run `filemaid preview` (or `filemaid run`) with no rules argument, Filemaid resolves rules in this order:
+
+1. nearest project root from current working directory (`filemaid.asd` or `rules/organization-rules.lisp`), then:
+   - `<project-root>/rules/organization-rules.lisp`
+   - `<project-root>/rules/example-rules.lisp`
+2. first existing path in `*default-rules-files*`
+3. `~/.config/filemaid/projects/<*default-project-name*>/rules/organization-rules.lisp` (when set)
+4. `~/.config/filemaid/rules/organization-rules.lisp`
+5. `~/.config/filemaid/rules/example-rules.lisp`
+6. first discovered `~/.config/filemaid/rules/*.lisp`
+7. `./rules/organization-rules.lisp`
+8. `./rules/example-rules.lisp`
+9. first discovered `~/.config/filemaid/projects/*/rules/organization-rules.lisp`
+
+## Addons
+
+- Filemaid creates/uses `~/.config/filemaid/addons/` for extension modules.
+- Addons are loaded at startup when `*autoload-addons*` is true (default).
+- By default, all `*.lisp` files in addons root are loaded.
+- Use `*enabled-addons*` to whitelist addon names or paths.
+
+## Example Rules
+
+- Example rule sets are available in `examples/`.
+- Start with `examples/documents-rules.lisp` for basic organization.
+- See `examples/README.md` for usage and scenario details.
 
 ## Conflict Resolution
 
@@ -65,6 +98,7 @@ filemaid watch ~/Downloads --backend auto --interval 2 --iterations 5 --verbose
 - Per-conflict decisions are persisted to `~/.config/filemaid/conflict-resolution.sexp` and reused automatically.
 - Use `filemaid conflict-profile list` to inspect saved decisions.
 - Use `filemaid conflict-profile remove <key|index>` or `clear` to manage saved decisions.
+- Use `filemaid conflict-profile export` and `import` to share/reuse decision profiles.
 - Use `--yes` (or `--auto-approve`) to skip interactive confirmation for automation.
 
 Example in `~/.config/filemaid/config.lisp`:
@@ -73,6 +107,11 @@ Example in `~/.config/filemaid/config.lisp`:
 (in-package :filemaid)
 (set-conflict-policy :priority)
 (set-file-conflict-policy :rename)
+
+;; Optional addons config:
+(setf *autoload-addons* t)
+(setf *addons-root* #P"~/.config/filemaid/addons/")
+;; (setf *enabled-addons* '("my-addon" "extra-rules.lisp"))
 
 ;; Optional path for persisted per-conflict choices:
 (setf *conflict-resolution-profile-path* #P"~/.config/filemaid/conflict-resolution.sexp")

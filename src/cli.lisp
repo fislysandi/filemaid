@@ -20,7 +20,9 @@
   (format t
           "  filemaid explain-conflicts <rules-file> [--diagnostics-format FMT]~%")
   (format t
-          "  filemaid conflict-profile list|clear|remove <key> [--diagnostics-format FMT]~%")
+          "  filemaid conflict-profile list|clear|remove|export|import ...~%")
+  (format t
+          "                     remove <key|index> | export <path> | import <path> [--replace]~%")
   (format t "  filemaid scan <directory>~%")
   (format t
           "  filemaid watch <directory> [--backend auto|poll|inotify] [--interval N]~%")
@@ -502,8 +504,69 @@
        (conflict-profile-clear-command))
       ((string= subcommand "remove")
        (conflict-profile-remove-command (first rest-args)))
+      ((string= subcommand "export")
+       (conflict-profile-export-command (first rest-args)))
+      ((string= subcommand "import")
+       (conflict-profile-import-command (first rest-args)
+                                        :replace (argument-present-p rest-args "--replace")))
       (t
        (error "Unsupported conflict-profile subcommand: ~A" subcommand)))))
+
+(defun conflict-profile-export-command (path)
+  "Export profile entries to PATH as s-expression data."
+  (unless path
+    (error "Provide output path: filemaid conflict-profile export <path>."))
+  (let ((entries (conflict-profile-entries))
+        (pathname (pathname path)))
+    (ensure-directories-exist pathname)
+    (with-open-file (stream pathname
+                            :direction :output
+                            :if-exists :supersede
+                            :if-does-not-exist :create)
+      (print entries stream))
+    (format t "Exported ~D entries to ~A~%" (length entries) (namestring pathname))
+    0))
+
+(defun read-conflict-profile-file (path)
+  "Read conflict profile entries from PATH and return alist."
+  (let ((pathname (pathname path)))
+    (unless (probe-file pathname)
+      (error "Import path not found: ~A" path))
+    (with-open-file (stream pathname :direction :input)
+      (let ((eof-marker (gensym "EOF")))
+        (let ((data (read stream nil eof-marker)))
+          (if (eq data eof-marker)
+              nil
+              data))))))
+
+(defun merge-conflict-profile-entries (existing incoming)
+  "Merge INCOMING entries into EXISTING, replacing matching keys."
+  (setf *conflict-resolution-profile* (copy-list existing))
+  (dolist (entry incoming)
+    (let ((key (first entry))
+          (decision (rest entry)))
+      (conflict-profile-set key decision)))
+  *conflict-resolution-profile*)
+
+(defun conflict-profile-import-command (path &key (replace nil))
+  "Import profile entries from PATH.
+When REPLACE is true, replace current entries instead of merging."
+  (unless path
+    (error "Provide import path: filemaid conflict-profile import <path>."))
+  (load-conflict-resolution-profile)
+  (let ((incoming (read-conflict-profile-file path)))
+    (cond
+      (replace
+       (setf *conflict-resolution-profile* incoming))
+      (t
+       (setf *conflict-resolution-profile*
+             (merge-conflict-profile-entries *conflict-resolution-profile* incoming))))
+    (save-conflict-resolution-profile)
+    (format t "Imported ~D entries from ~A (~A).~%"
+            (length incoming)
+            path
+            (if replace "replace" "merge"))
+    0))
 
 (defun resolve-interactive-file-policy (raw-file-policy automated-mode)
   "Resolve file conflict policy from RAW-FILE-POLICY or interactive prompt."
@@ -623,7 +686,8 @@
 
 (defun run-with-confirmation (rules-file args)
   "Run command flow with preview and interactive approval when needed."
-  (let* ((dry-run (argument-present-p args "--dry-run"))
+  (let* ((effective-rules-file (or rules-file (resolve-default-rules-file)))
+         (dry-run (argument-present-p args "--dry-run"))
          (verbose (argument-present-p args "--verbose"))
          (automated-mode (automated-mode-p args))
          (raw-policy (flag-value args "--conflict-policy"))
@@ -634,9 +698,14 @@
                               (flag-value args "--diagnostics-format")))
          (selected-file-policy
            (resolve-interactive-file-policy raw-file-policy automated-mode)))
+    (unless effective-rules-file
+      (error
+       (concatenate 'string
+                    "No rules file provided and no default rules found. "
+                    "Set *default-rules-files* or create rules/organization-rules.lisp.")))
     (cond
       ((or dry-run automated-mode)
-        (execute-rules-file rules-file
+        (execute-rules-file effective-rules-file
                             :dry-run dry-run
                             :verbose verbose
                             :rollback-on-error rollback-on-error
@@ -646,14 +715,14 @@
         0)
       (t
        (multiple-value-bind (rules files intents conflicts)
-           (load-plan-context rules-file)
+           (load-plan-context effective-rules-file)
          (let* ((intents-for-preview
                   (if (and per-conflict conflicts)
                       (apply-per-conflict-selections intents conflicts)
                       intents))
                 (remaining-conflicts (collect-conflicts intents-for-preview))
                 (policy (resolve-interactive-policy raw-policy remaining-conflicts))
-                (plan (execute-rules-file rules-file
+                (plan (execute-rules-file effective-rules-file
                                            :dry-run t
                                            :verbose nil
                                            :rollback-on-error nil
@@ -667,7 +736,7 @@
            (print-plan-preview plan)
            (cond
              ((prompt-for-approval)
-              (execute-rules-file rules-file
+              (execute-rules-file effective-rules-file
                                   :dry-run nil
                                   :verbose verbose
                                   :rollback-on-error rollback-on-error
@@ -785,8 +854,15 @@
       ((string= command "run")
        (run-with-confirmation (first args) args))
       ((string= command "preview")
-       (progn
-         (execute-rules-file (first args)
+       (let ((rules-file (or (first args)
+                             (resolve-default-rules-file))))
+          (unless rules-file
+            (error
+             (concatenate 'string
+                          "No rules file provided and no default rules found. "
+                          "Set *default-rules-files* or create "
+                          "rules/organization-rules.lisp.")))
+         (execute-rules-file rules-file
                              :dry-run t
                              :verbose (argument-present-p args "--verbose")
                              :rollback-on-error nil

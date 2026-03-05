@@ -28,6 +28,26 @@
 (defparameter *conflict-resolution-profile* nil
   "Alist of (conflict-key-string . decision-keyword).")
 
+(defparameter *default-project-name* nil
+  "Optional default project name under projects root for implicit preview/run.")
+
+(defparameter *default-rules-files* nil
+  "Optional ordered list of explicit default rules file path strings/pathnames.")
+
+(defparameter *global-rules-root*
+  #P"~/.config/filemaid/rules/"
+  "Default global rules directory for implicit preview/run.")
+
+(defparameter *addons-root*
+  #P"~/.config/filemaid/addons/"
+  "Default addons directory for optional extension loading.")
+
+(defparameter *enabled-addons* nil
+  "Optional list of addon names or file path strings to load.")
+
+(defparameter *autoload-addons* t
+  "When true, load addons during startup via load-default-config.")
+
 (defun valid-conflict-policy-p (policy)
   "Return true when POLICY is one of supported conflict policies."
   (member policy *valid-conflict-policies*))
@@ -114,10 +134,113 @@
   "Return default templates root pathname."
   (uiop:ensure-directory-pathname *project-templates-root*))
 
+(defun global-rules-root-pathname ()
+  "Return default global rules root pathname."
+  (uiop:ensure-directory-pathname *global-rules-root*))
+
+(defun addons-root-pathname ()
+  "Return default addons root pathname."
+  (uiop:ensure-directory-pathname *addons-root*))
+
+(defun discover-addon-files ()
+  "Return all .lisp addon files under addons root."
+  (directory (merge-pathnames "*.lisp" (addons-root-pathname))))
+
+(defun addon-entry-pathname (entry)
+  "Resolve addon ENTRY (name or path) to pathname candidate."
+  (let* ((raw (pathname entry))
+         (raw-type (pathname-type raw))
+         (with-ext (if raw-type raw (pathname (format nil "~A.lisp" entry)))))
+    (or (probe-file with-ext)
+        (probe-file (merge-pathnames with-ext (addons-root-pathname))))))
+
+(defun resolve-enabled-addon-files ()
+  "Resolve enabled addon list. Falls back to all addon files when empty."
+  (if *enabled-addons*
+      (remove nil (mapcar #'addon-entry-pathname *enabled-addons*))
+      (discover-addon-files)))
+
+(defun load-addons (&key (verbose nil))
+  "Load addon files and return loaded pathnames."
+  (let ((files (resolve-enabled-addon-files)))
+    (dolist (file files)
+      (load file)
+      (when verbose
+        (format t "Loaded addon: ~A~%" (namestring file))))
+    files))
+
+(defun pathname-parent (path)
+  "Return parent directory of PATH, or NIL when unavailable."
+  (let ((parent (uiop:pathname-parent-directory-pathname
+                 (uiop:ensure-directory-pathname path))))
+    (if (equal parent (uiop:ensure-directory-pathname path))
+        nil
+        parent)))
+
+(defun find-project-root-from-cwd ()
+  "Find nearest parent directory that looks like a Filemaid project."
+  (loop for current = (uiop:ensure-directory-pathname (uiop:getcwd)) then (pathname-parent current)
+        while current
+        when (or (probe-file (merge-pathnames "filemaid.asd" current))
+                 (probe-file (merge-pathnames "rules/organization-rules.lisp" current)))
+          do (return current)))
+
+(defun rules-file-from-project-root (root)
+  "Resolve primary rules file from project ROOT."
+  (or (probe-file (merge-pathnames "rules/organization-rules.lisp" root))
+      (probe-file (merge-pathnames "rules/example-rules.lisp" root))))
+
+(defun cwd-project-rules-pathname ()
+  "Resolve rules file from current project context when present."
+  (let ((root (find-project-root-from-cwd)))
+    (and root (rules-file-from-project-root root))))
+
+(defun default-project-rules-pathname ()
+  "Return default project rules path when *DEFAULT-PROJECT-NAME* is set."
+  (when *default-project-name*
+    (merge-pathnames
+     (format nil "~A/rules/organization-rules.lisp" *default-project-name*)
+     (projects-root-pathname))))
+
+(defun existing-default-rules-files ()
+  "Return explicit *DEFAULT-RULES-FILES* entries that exist."
+  (remove-if-not #'probe-file
+                 (mapcar #'pathname (or *default-rules-files* '()))))
+
+(defun discover-project-rules-files ()
+  "Discover candidate rules files under projects root."
+  (let ((root (projects-root-pathname)))
+    (loop for project-dir in (uiop:subdirectories root)
+          for candidate = (merge-pathnames "rules/organization-rules.lisp" project-dir)
+          when (probe-file candidate)
+            collect candidate)))
+
+(defun discover-global-rules-files ()
+  "Discover candidate global rules files under ~/.config/filemaid/rules/."
+  (let ((root (global-rules-root-pathname)))
+    (append
+     (remove nil (list (probe-file (merge-pathnames "organization-rules.lisp" root))
+                       (probe-file (merge-pathnames "example-rules.lisp" root))))
+     (directory (merge-pathnames "*.lisp" root)))))
+
+(defun resolve-default-rules-file ()
+  "Resolve implicit default rules file from config and projects root."
+  (or
+   (cwd-project-rules-pathname)
+   (first (existing-default-rules-files))
+   (let ((default-project-rules (default-project-rules-pathname)))
+     (and default-project-rules (probe-file default-project-rules)))
+   (first (discover-global-rules-files))
+   (probe-file #P"./rules/organization-rules.lisp")
+   (probe-file #P"./rules/example-rules.lisp")
+   (first (discover-project-rules-files))))
+
 (defun load-default-config (&key (verbose nil))
   "Load ~/.config/filemaid/config.lisp when present.
 Returns :loaded when file is loaded and :missing otherwise."
   (let ((config (default-config-pathname)))
+    (ensure-directories-exist (global-rules-root-pathname))
+    (ensure-directories-exist (addons-root-pathname))
     (cond
       ((probe-file config)
        (load config)
@@ -126,12 +249,16 @@ Returns :loaded when file is loaded and :missing otherwise."
        (unless (valid-file-conflict-policy-p *file-conflict-policy*)
          (error "Configured *file-conflict-policy* is invalid: ~S"
                 *file-conflict-policy*))
-       (when verbose
-         (format t "Loaded config: ~A~%" (namestring config)))
-       (load-conflict-resolution-profile :force t)
-       :loaded)
+        (when verbose
+          (format t "Loaded config: ~A~%" (namestring config)))
+        (load-conflict-resolution-profile :force t)
+        (when *autoload-addons*
+          (load-addons :verbose verbose))
+        :loaded)
       (t
-       (when verbose
-         (format t "Config not found: ~A~%" (namestring config)))
-       (load-conflict-resolution-profile :force t)
-       :missing))))
+        (when verbose
+          (format t "Config not found: ~A~%" (namestring config)))
+        (load-conflict-resolution-profile :force t)
+        (when *autoload-addons*
+          (load-addons :verbose verbose))
+        :missing))))

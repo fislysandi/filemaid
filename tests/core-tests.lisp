@@ -37,6 +37,8 @@
   (test-dsl-behavior)
   (test-cli-parsing-helpers)
   (test-conflict-profile-persistence)
+  (test-default-rules-resolution)
+  (test-addon-resolution)
   (test-cli-integration)
   (test-python-bridge-gating)
   (cond
