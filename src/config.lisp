@@ -235,6 +235,53 @@
    (probe-file #P"./rules/example-rules.lisp")
    (first (discover-project-rules-files))))
 
+(defun normalize-rules-filename (spec)
+  "Return SPEC with .lisp extension when no file type is present."
+  (let ((path (pathname spec)))
+    (if (pathname-type path)
+        path
+        (pathname (format nil "~A.lisp" spec)))))
+
+(defun project-rules-candidates (spec)
+  "Return candidate project-local rules paths for SPEC."
+  (let* ((root (find-project-root-from-cwd))
+         (name (file-namestring (pathname spec))))
+    (if root
+        (remove nil
+                (list (merge-pathnames (format nil "rules/~A" name) root)
+                      (merge-pathnames (format nil "rules/~A" (file-namestring (normalize-rules-filename spec)))
+                                       root)))
+        nil)))
+
+(defun global-rules-candidates (spec)
+  "Return candidate global rules paths for SPEC."
+  (let ((root (global-rules-root-pathname))
+        (name (file-namestring (pathname spec))))
+    (remove nil
+            (list (merge-pathnames name root)
+                  (merge-pathnames (file-namestring (normalize-rules-filename spec)) root)
+                  (merge-pathnames (format nil "rules/~A" name) root)
+                  (merge-pathnames (format nil "rules/~A" (file-namestring (normalize-rules-filename spec)))
+                                   root)))))
+
+(defun rules-candidate-paths (spec)
+  "Return ordered candidate pathnames for user-provided rules SPEC."
+  (let ((raw (pathname spec))
+        (normalized (normalize-rules-filename spec)))
+    (append
+     (list raw normalized)
+     (project-rules-candidates spec)
+     (global-rules-candidates spec)
+     (list (merge-pathnames (format nil "rules/~A" (file-namestring (pathname spec)))
+                            (uiop:ensure-directory-pathname (uiop:getcwd)))
+           (merge-pathnames (format nil "rules/~A" (file-namestring normalized))
+                            (uiop:ensure-directory-pathname (uiop:getcwd)))))))
+
+(defun resolve-rules-spec (spec)
+  "Resolve user-provided rules SPEC to an existing file pathname."
+  (and spec
+       (find-if #'probe-file (rules-candidate-paths spec))))
+
 (defun load-default-config (&key (verbose nil))
   "Load ~/.config/filemaid/config.lisp when present.
 Returns :loaded when file is loaded and :missing otherwise."

@@ -82,6 +82,57 @@
                                 :validate t
                                 :if-does-not-exist :ignore)))
 
+(defun test-project-first-rules-resolution ()
+  "Test project-local rules win over global fallback when in project tree."
+  (let* ((suffix (write-to-string (get-universal-time)))
+         (project-root (format nil "/tmp/filemaid-project-root-~A/" suffix))
+         (project-rules (format nil "~Arules/organization-rules.lisp" project-root))
+         (nested-dir (format nil "~Asub/dir/" project-root))
+         (global-root (format nil "/tmp/filemaid-global-rules-~A/" suffix))
+         (global-rules (format nil "~Aorganization-rules.lisp" global-root))
+         (old-global-root filemaid::*global-rules-root*))
+    (ensure-directories-exist project-rules)
+    (ensure-directories-exist nested-dir)
+    (ensure-directories-exist global-rules)
+    (with-open-file (stream (format nil "~Afilemaid.asd" project-root)
+                            :direction :output :if-exists :supersede :if-does-not-exist :create)
+      (format stream "(asdf:defsystem \"dummy\")~%"))
+    (with-open-file (stream project-rules :direction :output :if-exists :supersede :if-does-not-exist :create)
+      (format stream "(in-package :filemaid)~%"))
+    (with-open-file (stream global-rules :direction :output :if-exists :supersede :if-does-not-exist :create)
+      (format stream "(in-package :filemaid)~%"))
+    (setf filemaid::*global-rules-root* global-root)
+    (uiop:with-current-directory (nested-dir)
+      (assert-true (equal (pathname project-rules)
+                          (pathname (filemaid:resolve-default-rules-file)))
+                   "project-local rules should be selected first"))
+    (setf filemaid::*global-rules-root* old-global-root)
+    (uiop:delete-directory-tree (uiop:ensure-directory-pathname project-root)
+                                :validate t
+                                :if-does-not-exist :ignore)
+    (uiop:delete-directory-tree (uiop:ensure-directory-pathname global-root)
+                                :validate t
+                                :if-does-not-exist :ignore)))
+
+(defun test-rules-spec-resolution ()
+  "Test short rules spec resolution (bare file name) inside project."
+  (let* ((suffix (write-to-string (get-universal-time)))
+         (project-root (format nil "/tmp/filemaid-rules-spec-~A/" suffix))
+         (rules-file (format nil "~Arules/organization-rules.lisp" project-root)))
+    (ensure-directories-exist rules-file)
+    (with-open-file (stream (format nil "~Afilemaid.asd" project-root)
+                            :direction :output :if-exists :supersede :if-does-not-exist :create)
+      (format stream "(asdf:defsystem \"dummy\")~%"))
+    (with-open-file (stream rules-file :direction :output :if-exists :supersede :if-does-not-exist :create)
+      (format stream "(in-package :filemaid)~%"))
+    (uiop:with-current-directory (project-root)
+      (assert-true (equal (pathname rules-file)
+                          (pathname (filemaid:resolve-rules-spec "organization-rules.lisp")))
+                   "resolve-rules-spec should resolve bare file names from project rules"))
+    (uiop:delete-directory-tree (uiop:ensure-directory-pathname project-root)
+                                :validate t
+                                :if-does-not-exist :ignore)))
+
 (defun test-addon-resolution ()
   "Test addon discovery and explicit addon selection."
   (let* ((suffix (write-to-string (get-universal-time)))

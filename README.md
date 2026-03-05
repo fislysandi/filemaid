@@ -20,11 +20,17 @@ Filemaid is a programmable filesystem automation engine written in Common Lisp, 
 
 ```bash
 filemaid run rules/example-rules.lisp
+filemaid run --rules rules/example-rules.lisp --yes
+filemaid run organization-rules.lisp --yes
 filemaid scan ~/Downloads
 filemaid preview rules/example-rules.lisp
+filemaid preview --rules rules/example-rules.lisp
+filemaid preview organization-rules.lisp
 filemaid preview
 filemaid init-project --template invoice-template --name my-filemaid-project
 filemaid init-project --template rules/example-rules.lisp --target ./my-custom-folder --template-name org-rules
+filemaid template list
+filemaid fs
 filemaid explain-conflicts rules/example-rules.lisp --diagnostics-format json
 filemaid conflict-profile list
 filemaid preview examples/documents-rules.lisp
@@ -36,8 +42,14 @@ filemaid watch ~/Downloads --backend auto --interval 2 --iterations 5 --verbose
 ## Runtime Flags
 
 - `run`: `--dry-run`, `--verbose`, `--no-rollback`, `--yes`, `--conflict-policy`, `--file-conflict-policy`, `--per-conflict`, `--diagnostics-format text|json`
+- `run`: supports positional rules arg and `--rules <path>`
+- `run`: supports short file names (e.g. `organization-rules.lisp`) with project/global lookup
 - `preview`: always dry-run; rules file is optional and falls back to configured/default project rules
+- `preview`: supports positional rules arg and `--rules <path>`
+- `preview`: supports short file names (e.g. `organization-rules.lisp`) with project/global lookup
 - `init-project`: `--template <name-or-path>`, optional `--template-name NAME`, `--target DIR`, `--name PROJECT`, `--verbose`
+- `template`: `list` available templates from configured templates root
+- `fs`: show filesystem-style overview of configured projects/rules/templates/addons
 - `explain-conflicts`: analyze rules and report conflicts without applying changes (exit `0` no conflicts, `2` conflicts found)
 - `conflict-profile`: manage saved per-conflict decisions (`list`, `remove <key|index>`, `clear`, `export <path>`, `import <path> [--replace]`)
 - `scan`: optional `--recursive`

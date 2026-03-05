@@ -6,11 +6,11 @@
   (format t
           "  filemaid run <rules-file> [--dry-run] [--verbose] [--no-rollback] [--yes]~%")
   (format t
-          "               [--conflict-policy POLICY] [--file-conflict-policy POLICY]~%")
+          "               [--rules PATH] [--conflict-policy POLICY] [--file-conflict-policy POLICY]~%")
   (format t
           "               [--per-conflict] [--diagnostics-format FMT]~%")
   (format t
-          "  filemaid preview <rules-file> [--verbose] [--conflict-policy POLICY]~%")
+          "  filemaid preview <rules-file> [--rules PATH] [--verbose] [--conflict-policy POLICY]~%")
   (format t
           "                   [--file-conflict-policy POLICY] [--diagnostics-format FMT]~%")
   (format t
@@ -18,7 +18,11 @@
   (format t
           "                     [--target DIR] [--name NAME] [--verbose]~%")
   (format t
-          "  filemaid explain-conflicts <rules-file> [--diagnostics-format FMT]~%")
+          "  filemaid explain-conflicts <rules-file> [--rules PATH] [--diagnostics-format FMT]~%")
+  (format t
+          "  filemaid template list~%")
+  (format t
+          "  filemaid fs~%")
   (format t
           "  filemaid conflict-profile list|clear|remove|export|import ...~%")
   (format t
@@ -44,6 +48,43 @@
   (let ((position (position flag argv :test #'string=)))
     (when position
       (nth (1+ position) argv))))
+
+(defparameter *run-preview-value-options*
+  '("--rules" "--conflict-policy" "--file-conflict-policy" "--diagnostics-format"))
+
+(defun positional-rule-argument (args)
+  "Return positional rules argument while skipping option values."
+  (loop with skip-next = nil
+        for arg in args do
+          (cond
+            (skip-next
+             (setf skip-next nil))
+            ((member arg *run-preview-value-options* :test #'string=)
+             (setf skip-next t))
+            ((and (> (length arg) 0)
+                  (char= (char arg 0) #\-))
+             nil)
+            (t
+             (return arg)))))
+
+(defun rules-argument-from-args (args)
+  "Resolve rules argument from --rules or positional fallback."
+  (or (flag-value args "--rules")
+      (positional-rule-argument args)))
+
+(defun resolve-user-rules-or-default (args &key (allow-default t))
+  "Resolve rules path from args, with optional default fallback."
+  (let* ((raw (rules-argument-from-args args))
+         (resolved (and raw (resolve-rules-spec raw))))
+    (cond
+      ((and raw resolved)
+       resolved)
+      (raw
+       (error "Rules file not found: ~A. Use --rules with a valid path." raw))
+      (allow-default
+       (resolve-default-rules-file))
+      (t
+       nil))))
 
 (defun parse-positive-integer (value default)
   "Parse VALUE as positive integer or return DEFAULT."
@@ -264,8 +305,101 @@
 (defun resolve-template-pathname (template-spec)
   "Resolve TEMPLATE-SPEC as file path or named template under templates root."
   (or (find-if #'probe-file (template-pathname-candidates template-spec))
-      (error "Template not found. Use existing path or name from ~A"
-             (namestring (project-templates-root-pathname)))))
+      (error "Template not found: ~A. Run 'filemaid template list' and retry."
+             template-spec)))
+
+(defun template-name-from-path (path)
+  "Return display template name from PATH."
+  (or (pathname-name (pathname path))
+      (file-namestring (pathname path))))
+
+(defun discover-template-files ()
+  "Return all template files in configured templates root."
+  (directory (merge-pathnames "*.lisp" (project-templates-root-pathname))))
+
+(defun template-list-command ()
+  "List available project templates with resolved paths."
+  (let ((templates (discover-template-files)))
+    (cond
+      ((null templates)
+       (format t "No templates found in ~A~%" (namestring (project-templates-root-pathname))))
+      (t
+       (format t "Available templates (~D):~%" (length templates))
+       (dolist (template templates)
+         (format t "  ~A -> ~A~%"
+                 (template-name-from-path template)
+                 (namestring template)))))
+    0))
+
+(defun template-command (args)
+  "Dispatch template subcommands."
+  (let ((subcommand (first args)))
+    (cond
+      ((or (null subcommand) (string= subcommand "list"))
+       (template-list-command))
+      (t
+       (error "Unsupported template subcommand: ~A" subcommand)))))
+
+(defun lisp-files-in-directory (directory)
+  "Return *.lisp files under DIRECTORY when it exists."
+  (if (probe-file directory)
+      (directory (merge-pathnames "*.lisp" (uiop:ensure-directory-pathname directory)))
+      '()))
+
+(defun project-directories ()
+  "Return project directories from configured projects root."
+  (let ((root (projects-root-pathname)))
+    (if (probe-file root)
+        (uiop:subdirectories root)
+        '())))
+
+(defun file-label (path)
+  "Return friendly display label for PATH."
+  (file-namestring (pathname path)))
+
+(defun project-label (project-dir)
+  "Return project name label from PROJECT-DIR pathname."
+  (let* ((dir (uiop:ensure-directory-pathname project-dir))
+         (components (pathname-directory dir))
+         (name (first (last components))))
+    (if (stringp name) name (file-label dir))))
+
+(defun print-tree-files (prefix files)
+  "Print FILES list with PREFIX tree indentation."
+  (if (null files)
+      (format t "~A(empty)~%" prefix)
+      (dolist (file files)
+        (format t "~A~A~%" prefix (file-label file)))))
+
+(defun print-project-tree (projects)
+  "Print projects section with rules file visibility."
+  (if (null projects)
+      (format t "|  (no projects)~%")
+      (dolist (project projects)
+        (let ((rules-file (merge-pathnames "rules/organization-rules.lisp"
+                                           (uiop:ensure-directory-pathname project))))
+          (format t "|  |- ~A/~A~%"
+                  (project-label project)
+                  (if (probe-file rules-file) " (rules: organization-rules.lisp)" ""))))))
+
+(defun filesystem-overview-command ()
+  "Print filesystem-style overview of projects, rules, templates, and addons."
+  (let ((projects-root (projects-root-pathname))
+        (rules-root (global-rules-root-pathname))
+        (templates-root (project-templates-root-pathname))
+        (addons-root (addons-root-pathname)))
+    (format t "Filemaid Filesystem Overview~%")
+    (format t "~A~%" (namestring (uiop:ensure-directory-pathname (or (uiop:getenv "HOME") "~"))))
+    (format t "|-- .config/filemaid/~%")
+    (format t "|  |-- projects/ (~A)~%" (namestring projects-root))
+    (print-project-tree (project-directories))
+    (format t "|  |-- rules/ (~A)~%" (namestring rules-root))
+    (print-tree-files "|  |  |- " (lisp-files-in-directory rules-root))
+    (format t "|  |-- templates/ (~A)~%" (namestring templates-root))
+    (print-tree-files "|  |  |- " (lisp-files-in-directory templates-root))
+    (format t "|  `-- addons/ (~A)~%" (namestring addons-root))
+    (print-tree-files "|     |- " (lisp-files-in-directory addons-root))
+    0))
 
 (defun resolve-project-root (template-spec project-name target-option)
   "Resolve output project root using custom hook, target, or default root."
@@ -313,9 +447,9 @@
                             (install-template-rules resolved-template
                                                     root
                                                     template-name))))
+    (format t "Selected template: ~A~%" (namestring resolved-template))
     (when verbose
       (format t "Initialized project at: ~A~%" (namestring root))
-      (format t "Template source: ~A~%" (namestring resolved-template))
       (format t "Installed organization rules: ~A~%" (namestring installed-path)))
     0))
 
@@ -689,7 +823,9 @@ When REPLACE is true, replace current entries instead of merging."
 
 (defun run-with-confirmation (rules-file args)
   "Run command flow with preview and interactive approval when needed."
-  (let* ((effective-rules-file (or rules-file (resolve-default-rules-file)))
+  (let* ((effective-rules-file (or rules-file
+                                   (resolve-user-rules-or-default args)
+                                   (resolve-default-rules-file)))
          (dry-run (argument-present-p args "--dry-run"))
          (verbose (argument-present-p args "--verbose"))
          (automated-mode (automated-mode-p args))
@@ -855,13 +991,12 @@ When REPLACE is true, replace current entries instead of merging."
        (print-usage)
        1)
       ((string= command "run")
-       (run-with-confirmation (first args) args))
+       (run-with-confirmation (resolve-user-rules-or-default args) args))
       ((string= command "preview")
-       (let ((rules-file (or (first args)
-                             (resolve-default-rules-file))))
-          (unless rules-file
-            (error
-             (concatenate 'string
+       (let ((rules-file (resolve-user-rules-or-default args)))
+           (unless rules-file
+             (error
+              (concatenate 'string
                           "No rules file provided and no default rules found. "
                           "Set *default-rules-files* or create "
                           "rules/organization-rules.lisp.")))
@@ -886,10 +1021,14 @@ When REPLACE is true, replace current entries instead of merging."
          :project-name (flag-value args "--name")
          :verbose (argument-present-p args "--verbose")))
       ((string= command "explain-conflicts")
-       (explain-conflicts-command
-        (first args)
-        :diagnostics-format
-        (normalize-diagnostics-format (flag-value args "--diagnostics-format"))))
+        (explain-conflicts-command
+         (resolve-user-rules-or-default args :allow-default nil)
+         :diagnostics-format
+         (normalize-diagnostics-format (flag-value args "--diagnostics-format"))))
+      ((string= command "template")
+       (template-command args))
+      ((string= command "fs")
+       (filesystem-overview-command))
       ((string= command "conflict-profile")
        (conflict-profile-command args))
       ((string= command "scan")

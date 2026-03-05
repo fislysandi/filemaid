@@ -65,6 +65,7 @@
    #:resolve-enabled-addon-files
    #:load-addons
    #:resolve-default-rules-file
+   #:resolve-rules-spec
    #:projects-root-pathname
    #:project-templates-root-pathname
    #:*projects-root*
